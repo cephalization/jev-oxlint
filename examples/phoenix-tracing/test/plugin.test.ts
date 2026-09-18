@@ -144,6 +144,20 @@ describe("no-sensitive-span-attributes", () => {
   });
 });
 
+describe("annotation-identifier-collision (drafted by jev-lint propose)", () => {
+  it("reports the panel-review loop that overwrites annotations and stays quiet on the correct version and both traps", () => {
+    const bad = byFixture("bad-panel-review-annotations.ts").map((d) => d.message);
+    expect(bad).toEqual([
+      expect.stringMatching(
+        /\[jev:annotation-identifier-collision\] addSpanAnnotation\(\) can write several annotations/,
+      ),
+    ]);
+    expect(byFixture("good-panel-review-annotations.ts")).toEqual([]);
+    expect(byFixture("trap-open-coding-notes.ts")).toEqual([]);
+    expect(byFixture("trap-eval-rerun-batch.ts")).toEqual([]);
+  });
+});
+
 describe("routing and hints", () => {
   it("asks one relevance question per bundled reference with SKILL.md as the index", () => {
     const routing = requests().filter(

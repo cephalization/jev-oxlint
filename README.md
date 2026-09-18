@@ -128,3 +128,21 @@ Measured against jev-1.13.0 on the fixtures and every app in Phoenix's `js/examp
   one `SKILL.md` blurb moved a reference's relevance from below 0.50 to 0.90 and fired the
   hint at 1.00, with no plugin change. Hint recall is bounded by the index's blurbs.
 - **Cost.** ~$0.002 for the fixtures; ~$0.015 for 41 files with routing. Second run: zero requests.
+
+### What `propose` drafted, unprompted
+
+Run against Phoenix's example apps for `references/annotations-typescript.md`, a guidance file
+no check covered, `claude-opus-5` drafted
+[`annotation-identifier-collision`](examples/phoenix-tracing/src/checks/annotationIdentifierCollision.ts)
+in 253 s (23k in / 22.5k out tokens): structured annotations are keyed by (name, target id,
+identifier) and silently overwrite, while notes are append-only, so a loop writing one
+annotation per reviewer without a distinct `identifier` loses all but the last verdict. It
+compiled on the first try, registered itself, and shipped four fixtures including two traps
+(an idempotent evaluator re-run, and free-form notes, which are supposed to look similar but
+are fine). Its answer key agreed with jev on all four on the first calibration (violation
+0.08, correct 0.92, traps 0.50 and 0.66 for "uniquely keyed?"). The review note it wrote
+leads with the one question and the threshold band, and lists four facts the engine does not
+extract that would let the precheck decide more cases in code. One redundant type cast was
+removed by hand; nothing else was changed. The first attempt failed on a truncated structured
+output: adaptive thinking shares `max_tokens` with the answer, so `propose` streams with a
+64k budget.

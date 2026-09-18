@@ -131,5 +131,29 @@
         "not_applicable": 0.15
       }
     }
+  },
+  "bad-panel-review-annotations.ts": {
+    "annotation_identifier:1": {
+      "type": "noul",
+      "noul": 0.04
+    }
+  },
+  "good-panel-review-annotations.ts": {
+    "annotation_identifier:1": {
+      "type": "noul",
+      "noul": 0.93
+    }
+  },
+  "trap-open-coding-notes.ts": {
+    "annotation_identifier:3": {
+      "type": "noul",
+      "noul": 0.86
+    }
+  },
+  "trap-eval-rerun-batch.ts": {
+    "annotation_identifier:1": {
+      "type": "noul",
+      "noul": 0.72
+    }
   }
 }

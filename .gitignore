@@ -3,3 +3,5 @@ dist
 *.tsbuildinfo
 .jev-cache
 proposals/*.packet.md
+!.env.example
+.env*

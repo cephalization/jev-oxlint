@@ -7,6 +7,7 @@ import { flushBeforeExit } from "./checks/flushBeforeExit.js";
 import { noSensitiveSpanAttributes } from "./checks/noSensitiveSpanAttributes.js";
 import { noSessionWrapper } from "./checks/noSessionWrapper.js";
 import { spanKindMatchesBody } from "./checks/spanKindMatchesBody.js";
+import { annotationIdentifierCollision } from "./checks/annotationIdentifierCollision.js";
 
 export const PHOENIX_OTEL = "@arizeai/phoenix-otel";
 export const OPENINFERENCE_CORE = "@arizeai/openinference-core";
@@ -46,5 +47,6 @@ export const linter = defineLinter({
     noSessionWrapper,
     esmManualInstrumentation,
     noSensitiveSpanAttributes,
+    annotationIdentifierCollision,
   ],
 });

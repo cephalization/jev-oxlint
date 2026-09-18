@@ -1,3 +1,41 @@
+# Proposed check: annotation-identifier-collision
+
+Drafted by claude-opus-5 from `references/annotations-typescript.md`. **Review the questions and thresholds before anything else.**
+
+## Summary
+
+Phoenix structured annotations are keyed by (name, target id, identifier), so writing the same triple twice silently overwrites the earlier entry; notes are append-only and never collide. The check anchors on every structured annotation writer imported from @arizeai/phoenix-client/{spans,traces,sessions}, skips deterministically when the inline payload already sets `identifier`, and asks jev one Noul question per remaining write: can two annotations that are meant to coexist land on the same name + target id without a distinct identifier? A finding fires only when P(not uniquely keyed) clears options.threshold.
+
+## Questions to review
+
+- Judging only `code.text`, is every annotation written by this call uniquely keyed — i.e. no two annotations that are meant to coexist can share the same annotation `name`, the same target id, and the same `identifier`?
+
+## Thresholds
+
+Only options.threshold is used: the answer is a Noul on compliance and decide flags when 1 - noul >= threshold. The interesting calibration band is the idempotent single-evaluator sweep (trap-eval-rerun-batch.ts), where a reviewer should land around noul 0.7 (P(violation) 0.3) — a threshold below ~0.35 would start flagging the shipped Phoenix example scripts. A threshold around 0.6–0.7 keeps the panel-review violation (P ~0.96) and drops both traps. options.minConfidence is unused because the check asks no Choice questions.
+
+## Facts the engine does not extract yet
+
+- Element shape of batch payloads: whether the objects pushed into `spanAnnotations`/`sessionAnnotations` arrays (usually built by `.map()` elsewhere in the file) set `identifier`, so the precheck could decide those calls without asking.
+- Loop/repetition context for a call site: whether an annotation writer sits inside a `for`/`map` over reviewers, evaluators or retries, versus being executed once per target.
+- Literal values of `name` and `identifier` (redacted to `<str:N>`), which would let the check see whether two writes in the same file use the same annotation name for the same target.
+- Whether the local variable passed as the payload is assigned from a cross-file helper, which currently forces the question to rely on `code.text` reading alone.
+
+## Fixtures
+
+- `fixtures/bad-panel-review-annotations.ts` — violation
+- `fixtures/good-panel-review-annotations.ts` — correct
+- `fixtures/trap-open-coding-notes.ts` — trap
+- `fixtures/trap-eval-rerun-batch.ts` — trap
+
+## Next
+
+```bash
+pnpm build && jev-lint calibrate --plugin dist/index.js --key answer-key.json fixtures
+```
+
+<details><summary>Packet the model received</summary>
+
 # Proposal context: references/annotations-typescript.md
 
 Skill: `phoenix-tracing`. Plugin name: `phoenix`. Target import pattern: `^(@arizeai\/(phoenix-otel|phoenix-client|openinference-[\w-]+)|@opentelemetry\/[\w-]+)(\/.*)?$`.
@@ -1796,3 +1834,5 @@ export const flushBeforeExit = defineCheck({
   },
 });
 ```
+
+</details>

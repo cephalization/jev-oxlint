@@ -80,27 +80,54 @@ export async function proposeWithClaude(
 ): Promise<ProposeResult> {
   const client = new Anthropic();
   const model = options.model ?? DEFAULT_MODEL;
-  options.onStatus?.(`asking ${model} to draft the check…`);
+  const status = options.onStatus ?? (() => {});
+  status(`asking ${model} to draft the check…`);
+  const started = Date.now();
   try {
-    const response = await client.messages.parse({
+    // Streaming: adaptive thinking shares max_tokens with the answer, and a
+    // full check bundle is long, so give it room and avoid HTTP timeouts.
+    const stream = client.messages.stream({
       model,
-      max_tokens: 16000,
+      max_tokens: 64000,
       thinking: { type: "adaptive" },
       output_config: { effort: options.effort ?? "high", format: zodOutputFormat(ProposalSchema) },
       system: SYSTEM,
       messages: [{ role: "user", content: packet }],
     });
-    if (response.stop_reason === "refusal") {
-      const why = response.stop_details?.explanation ?? "no explanation";
-      throw new Error(`the model declined to draft this check (${why})`);
+    let phase = "";
+    for await (const event of stream) {
+      if (event.type === "content_block_start" && event.content_block.type !== phase) {
+        phase = event.content_block.type;
+        status(
+          `  ${phase === "thinking" ? "thinking" : "writing the bundle"}… (${Math.round((Date.now() - started) / 1000)}s)`,
+        );
+      }
     }
-    if (response.stop_reason === "max_tokens") {
+    let response;
+    try {
+      response = await stream.finalMessage();
+    } catch (parseError) {
+      const partial = stream.currentMessage;
+      if (partial?.stop_reason === "max_tokens") {
+        throw new Error(
+          `the draft was cut off at max_tokens after ${partial.usage.output_tokens} output tokens; retry with --effort medium, a shorter guidance file, or fewer samples`,
+        );
+      }
+      if (partial?.stop_reason === "refusal") {
+        throw new Error(
+          `the model declined to draft this check (${partial.stop_details?.explanation ?? "no explanation"})`,
+        );
+      }
+      throw parseError;
+    }
+    if (response.stop_reason === "refusal") {
       throw new Error(
-        "the draft was cut off at max_tokens; retry with a smaller guidance file or fewer samples",
+        `the model declined to draft this check (${response.stop_details?.explanation ?? "no explanation"})`,
       );
     }
     if (!response.parsed_output)
       throw new Error("the model's reply did not match the proposal schema");
+    status(`  done in ${Math.round((Date.now() - started) / 1000)}s`);
     return {
       proposal: response.parsed_output,
       model: response.model,
