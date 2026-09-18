@@ -1,0 +1,28 @@
+{
+  "name": "@jev-oxlint/example-phoenix-tracing",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Example jev-oxlint linter: does code follow the Phoenix tracing skill?",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node dist/verify.js",
+    "clean": "rm -rf dist",
+    "sync-skills": "node dist/sync.js",
+    "demo": "cd ../.. && OXLINT_JEV_MODE=${OXLINT_JEV_MODE:-record} oxlint -c examples/phoenix-tracing/demo.oxlintrc.json examples/phoenix-tracing/fixtures",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@jev-oxlint/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/estree": "^1.0.9",
+    "@types/node": "^26.5.1",
+    "vitest": "^5.0.0"
+  },
+  "peerDependencies": {
+    "oxlint": ">=1.79.0"
+  }
+}

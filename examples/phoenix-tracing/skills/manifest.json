@@ -1,0 +1,28 @@
+{
+  "sourceCommit": "82532e83f2cd5f0e215ea306acb40a65661b12eb",
+  "copiedAt": "2026-09-18T18:40:53.717Z",
+  "files": [
+    "phoenix-tracing/SKILL.md",
+    "phoenix-tracing/references/annotations-typescript.md",
+    "phoenix-tracing/references/fundamentals-flattening.md",
+    "phoenix-tracing/references/fundamentals-overview.md",
+    "phoenix-tracing/references/fundamentals-required-attributes.md",
+    "phoenix-tracing/references/fundamentals-universal-attributes.md",
+    "phoenix-tracing/references/instrumentation-auto-typescript.md",
+    "phoenix-tracing/references/instrumentation-manual-typescript.md",
+    "phoenix-tracing/references/metadata-typescript.md",
+    "phoenix-tracing/references/production-typescript.md",
+    "phoenix-tracing/references/projects-typescript.md",
+    "phoenix-tracing/references/sessions-typescript.md",
+    "phoenix-tracing/references/setup-typescript.md",
+    "phoenix-tracing/references/span-agent.md",
+    "phoenix-tracing/references/span-chain.md",
+    "phoenix-tracing/references/span-embedding.md",
+    "phoenix-tracing/references/span-evaluator.md",
+    "phoenix-tracing/references/span-guardrail.md",
+    "phoenix-tracing/references/span-llm.md",
+    "phoenix-tracing/references/span-reranker.md",
+    "phoenix-tracing/references/span-retriever.md",
+    "phoenix-tracing/references/span-tool.md"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@jev-oxlint/create",
+  "version": "0.1.0",
+  "description": "Scaffold a jev-powered oxlint linter from a directory of agent skills",
+  "license": "Apache-2.0",
+  "bin": {
+    "create-jev-linter": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "package.json"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod 755 dist/cli.js",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "vitest": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

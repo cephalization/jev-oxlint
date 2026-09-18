@@ -1,0 +1,5 @@
+{
+  "jsPlugins": [{ "name": "phoenix", "specifier": "./dist/index.js" }],
+  "rules": { "phoenix/guidance": "warn" },
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**"]
+}

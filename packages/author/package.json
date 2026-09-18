@@ -1,0 +1,34 @@
+{
+  "name": "@jev-oxlint/author",
+  "version": "0.1.0",
+  "description": "Authoring CLI for jev-oxlint linters: survey which guidance applies to a codebase, calibrate checks against an answer key, assemble the context for proposing new checks",
+  "license": "Apache-2.0",
+  "bin": {
+    "jev-lint": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "package.json"
+  ],
+  "type": "module",
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod 755 dist/cli.js",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@jev-oxlint/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "vitest": "^5.0.0"
+  },
+  "peerDependencies": {
+    "oxlint": ">=1.79.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

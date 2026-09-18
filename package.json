@@ -1,0 +1,28 @@
+{
+  "name": "jev-oxlint",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Build your own jev-powered oxlint linter from a directory of agent skills",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 run build",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "oxlint packages examples",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check"
+  },
+  "devDependencies": {
+    "@types/estree": "^1.0.9",
+    "@types/node": "^26.5.1",
+    "oxfmt": "^0.58.0",
+    "oxlint": "~1.79.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@12.0.0"
+}

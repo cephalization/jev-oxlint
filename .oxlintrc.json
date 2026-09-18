@@ -1,0 +1,16 @@
+{
+  "plugins": ["typescript", "node"],
+  "env": { "node": true },
+  "rules": {
+    "no-console": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/consistent-type-imports": "error",
+    "eslint/prefer-const": "error",
+    "typescript/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+  },
+  "overrides": [
+    { "files": ["examples/*/fixtures/**"], "rules": { "no-console": "off" } },
+    { "files": ["packages/author/**", "packages/create/**"], "rules": { "no-console": "off" } }
+  ],
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/skills/**", "**/*.md"]
+}
