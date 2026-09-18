@@ -18,7 +18,7 @@ questions about each file against the shipped guidance; code decides everything 
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`packages/engine`](packages/engine)                   | `@jev-oxlint/engine` — the runtime. Redaction, the sync bridge (oxlint rules are synchronous; jev is HTTP), the content-hash cache, generic AST fact extraction, guidance routing and the hint tier, and the `Check` contract. Knows nothing about any particular SDK. |
 | [`packages/create`](packages/create)                   | `create-jev-linter` — scaffolds a linter package from a skills directory. It works immediately with zero checks, in hint mode.                                                                                                                                         |
-| [`packages/author`](packages/author)                   | `jev-lint` — `survey` (which guidance applies to a codebase?), `calibrate` (do jev's answers match the human answer key?), `propose` (assemble the packet for drafting a new check).                                                                                   |
+| [`packages/author`](packages/author)                   | `jev-lint` — `survey` (which guidance applies to a codebase?), `calibrate` (do jev's answers match the human answer key?), `propose` (ask Claude to draft one check, its fixtures and answer key from the survey, then write and register them for review).            |
 | [`examples/phoenix-tracing`](examples/phoenix-tracing) | A complete linter for Phoenix's `phoenix-tracing` skill: five checks, thirteen fixtures, an answer key. This is what `propose` is meant to produce, one check at a time.                                                                                               |
 
 ## How a linter works
@@ -74,19 +74,27 @@ node packages/create/dist/cli.js my-lint --skills ~/proj/.agents/skills --skill 
 # 2. look: which guidance applies to this codebase, and how often?
 TYPESAFE_API_KEY=… jev-lint survey --plugin my-lint/dist/index.js ~/proj/src
 
-# 3. propose: assemble the packet for drafting one check (guidance + relevant files + contract)
-jev-lint propose --plugin my-lint/dist/index.js --guidance my-lint/skills/my-skill/references/x.md ~/proj/src
+# 3. propose: Claude drafts ONE check + fixtures + answer key from the survey and the guidance,
+#    writes them into the linter, registers the check, and (with --calibrate) builds and calibrates
+ANTHROPIC_API_KEY=… jev-lint propose --plugin my-lint/dist/index.js \
+  --guidance my-lint/skills/my-skill/references/x.md --calibrate ~/proj/src
+#    --dry-run writes only the packet (proposals/x.packet.md) for a person or another model
 
-# 4. write the check + fixtures + answer key (or have a model draft them from the packet), then
+# 4. review proposals/<check>.md first (questions, thresholds), edit src/checks/<check>.ts, then
 jev-lint calibrate --plugin my-lint/dist/index.js --key my-lint/answer-key.json my-lint/fixtures
 
 # 5. ship: add to any .oxlintrc.json
 #   { "jsPlugins": [{ "name": "my", "specifier": "my-lint" }], "rules": { "my/guidance": "warn" } }
 ```
 
-Where a generative model sits: only in step 4, drafting from the `propose` packet, and only
-when calibration drifts after a skill edit. jev runs on every lint, cached by content.
-Nothing generative is in the lint path, and nothing generative sees unredacted code.
+Where a generative model sits: only in step 3, and only when you run it. `propose` sends
+Claude (`claude-opus-5` by default, adaptive thinking, structured output) a packet built from
+the survey: the guidance file, the relevant files exactly as jev saw them (redacted), the
+engine's `Check` contract and a worked example. It returns a typed bundle: one check module,
+fixtures (violation, correct, trap), answer-key entries, and review notes that lead with the
+questions and thresholds. Auth is the SDK default: `ANTHROPIC_API_KEY` or an `ant auth login`
+profile. jev runs on every lint, cached by content; nothing generative is in the lint path,
+and nothing generative sees unredacted code.
 
 ## Running the example
 

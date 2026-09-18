@@ -139,6 +139,7 @@ import { linter } from "./linter.js";
 
 const plugin: Plugin = createPlugin(linter);
 export default plugin;
+export { linter };
 `,
 );
 write(

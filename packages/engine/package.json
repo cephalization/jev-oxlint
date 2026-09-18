@@ -18,7 +18,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && cp src/check.ts dist/check.contract.ts.txt",
     "clean": "rm -rf dist",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"

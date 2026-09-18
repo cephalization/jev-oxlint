@@ -2,3 +2,4 @@ node_modules
 dist
 *.tsbuildinfo
 .jev-cache
+proposals/*.packet.md

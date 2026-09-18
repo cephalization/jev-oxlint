@@ -4,34 +4,61 @@
  *
  *   jev-lint survey    --plugin <dist/index.js> [--threshold 0.7] <paths...>
  *   jev-lint calibrate --plugin <dist/index.js> --key <answer-key.json> <fixtures...>
- *   jev-lint propose   --plugin <dist/index.js> --guidance <references/x.md> <paths...>
+ *   jev-lint propose   --plugin <dist/index.js> --guidance <references/x.md> [--linter <dir>]
+ *                      [--dry-run] [--model claude-opus-5] [--effort high] [--calibrate] <paths...>
  *
  * All three run oxlint with the given plugin in live mode against a private
- * cache directory, then read the recorded requests/responses. `propose` stops
- * at assembling the context packet a generative model (or a person) needs to
- * draft a check; the model call itself is a deliberate seam, not yet wired.
+ * cache directory, then read the recorded requests/responses. `propose`
+ * additionally asks Claude to draft one check from the assembled packet and
+ * writes the check, fixtures, answer-key entries and a review note into the
+ * linter package (`--dry-run` writes only the packet).
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
-import type { AnalysisRecord, AnswerKey } from "@jev-oxlint/engine";
+import type { AnalysisRecord, AnswerKey, LinterConfig } from "@jev-oxlint/engine";
 import { calibrate, readRecords, summarizeRouting } from "@jev-oxlint/engine";
+
+import { applyProposal } from "./apply.js";
+import type { LinterInfo } from "./packet.js";
+import { buildPacket } from "./packet.js";
+import type { ProposeOptions } from "./propose.js";
+import { DEFAULT_MODEL, proposeWithClaude } from "./propose.js";
 
 interface Args {
   command: string;
   plugin?: string;
   key?: string;
   guidance?: string;
+  linter?: string;
   threshold: number;
   out?: string;
+  dryRun: boolean;
+  model: string;
+  effort?: ProposeOptions["effort"];
+  runCalibrate: boolean;
   paths: string[];
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { command: argv[0] ?? "help", threshold: 0.7, paths: [] };
+  const args: Args = {
+    command: argv[0] ?? "help",
+    threshold: 0.7,
+    paths: [],
+    dryRun: false,
+    model: DEFAULT_MODEL,
+    runCalibrate: false,
+  };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i]!;
     const next = () => argv[++i];
@@ -40,6 +67,11 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--guidance") args.guidance = next();
     else if (a === "--threshold") args.threshold = Number(next());
     else if (a === "--out") args.out = next();
+    else if (a === "--linter") args.linter = next();
+    else if (a === "--model") args.model = next() ?? DEFAULT_MODEL;
+    else if (a === "--effort") args.effort = next() as ProposeOptions["effort"];
+    else if (a === "--dry-run") args.dryRun = true;
+    else if (a === "--calibrate") args.runCalibrate = true;
     else args.paths.push(a);
   }
   return args;
@@ -136,65 +168,132 @@ function calibrateCmd(args: Args): number {
   return failed.length > 0 ? 1 : 0;
 }
 
-/**
- * Assemble everything a proposer needs to draft a check for one guidance
- * file: the guidance text, which surveyed files it applies to (with their
- * redacted code and extracted calls, taken from the recorded requests), and
- * the engine's check contract. Written as a single markdown packet.
- */
-function propose(args: Args): number {
+/** The linter package directory: --linter, else the nearest package.json above the plugin file. */
+function linterDirOf(args: Args): string {
+  if (args.linter) return path.resolve(args.linter);
+  let dir = path.dirname(path.resolve(args.plugin!));
+  for (;;) {
+    if (existsSync(path.join(dir, "package.json"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return path.dirname(path.resolve(args.plugin!));
+    dir = parent;
+  }
+}
+
+/** Read what the packet needs from the built plugin module (`export { linter }`) and its skills dir. */
+async function linterInfo(plugin: string, linterDir: string): Promise<LinterInfo> {
+  const info: LinterInfo = { references: [] };
+  try {
+    const mod = (await import(path.resolve(plugin))) as { linter?: LinterConfig };
+    const cfg = mod.linter;
+    if (cfg) {
+      info.name = cfg.name;
+      info.skill = cfg.skills.skill;
+      info.targets = cfg.facts.targets.source;
+      const refs = path.join(
+        path.resolve(cfg.packageRoot, cfg.skills.dir),
+        cfg.skills.skill,
+        "references",
+      );
+      if (existsSync(refs))
+        info.references = readdirSync(refs)
+          .filter((f) => f.endsWith(".md"))
+          .sort()
+          .map((f) => `references/${f}`);
+    }
+  } catch {
+    /* plugin without a `linter` export: proceed with less context */
+  }
+  if (info.references.length === 0) {
+    const skills = path.join(linterDir, "skills");
+    if (existsSync(skills)) {
+      for (const skill of readdirSync(skills)) {
+        const refs = path.join(skills, skill, "references");
+        if (existsSync(refs))
+          info.references.push(
+            ...readdirSync(refs)
+              .filter((f) => f.endsWith(".md"))
+              .sort()
+              .map((f) => `references/${f}`),
+          );
+      }
+    }
+  }
+  return info;
+}
+
+async function propose(args: Args): Promise<number> {
   if (!args.plugin || !args.guidance)
     return fail("propose needs --plugin and --guidance <skill>/references/<file>.md");
-  const records = runPlugin(args.plugin, args.paths, "live");
-  const stem = path.basename(args.guidance, ".md");
-  const relevant = records.filter(
-    (r) =>
-      r.kind === "routing" &&
-      (r.response?.answers[`relevant__${stem}`] as { noul?: number } | undefined)?.noul !==
-        undefined &&
-      ((r.response!.answers[`relevant__${stem}`] as { noul: number }).noul ?? 0) >= args.threshold,
-  );
-  const guidanceText = readFileSync(args.guidance, "utf8");
-  const samples = relevant.slice(0, 5).map((r) => {
-    const detailed = records.find((d) => d.kind === "detailed" && d.filename === r.filename);
-    const code = (r.request.state as { code: { text: string } }).code.text;
-    const calls = detailed
-      ? JSON.stringify((detailed.request.state as { code: { calls: unknown } }).code.calls, null, 2)
-      : "[]";
-    return `### ${path.relative(process.cwd(), r.filename)} (relevance ${(r.response!.answers[`relevant__${stem}`] as { noul: number }).noul.toFixed(2)})\n\n\`\`\`ts\n${code}\n\`\`\`\n\nExtracted calls:\n\n\`\`\`json\n${calls}\n\`\`\``;
-  });
-  const packet = [
-    `# Proposal context: ${args.guidance}`,
-    "",
-    `Routing found this guidance relevant (≥ ${args.threshold}) to ${relevant.length} of ${new Set(records.map((r) => r.filename)).size} surveyed file(s). No existing check cites it.`,
-    "",
-    "## Task for the proposer",
-    "",
-    "Draft ONE check in the `@jev-oxlint/engine` `Check` shape (see contract below): a deterministic `appliesTo`/`precheck` using the generic facts, one or more narrow Noul/Choice questions that point into `code.calls[i]` and `guidance.<stateKey>`, and a `decide`. Also draft three fixtures (a violation, a correct version, and a trap a naive rule would get wrong) and answer-key entries. Put the questions and thresholds first; they are what a reviewer must read.",
-    "",
-    "## Guidance",
-    "",
-    guidanceText.trim(),
-    "",
-    "## Sample in-scope files (redacted exactly as jev sees them)",
-    "",
-    ...samples,
-    "",
-    "## Check contract",
-    "",
-    "```ts",
-    readFileSync(new URL("../../engine/src/check.ts", import.meta.url), "utf8").trim(),
-    "```",
-    "",
-    usage(records),
-  ].join("\n");
-  const out = args.out ?? path.join("proposals", `${stem}.md`);
-  mkdirSync(path.dirname(out), { recursive: true });
-  writeFileSync(out, packet);
+  const linterDir = linterDirOf(args);
+  const info = await linterInfo(args.plugin, linterDir);
   console.log(
-    `wrote ${out} (${relevant.length} relevant file(s), ${samples.length} sample(s)). Hand it to a generative model or a person to draft the check.`,
+    `surveying ${args.paths.length} path(s) with ${path.relative(process.cwd(), args.plugin)}…`,
   );
-  return 0;
+  const records = runPlugin(args.plugin, args.paths, "live");
+  const packet = buildPacket(records, args.guidance, args.threshold, info);
+  console.log(
+    `${packet.guidanceFile}: relevant to ${packet.relevantCount} of ${packet.surveyedCount} in-scope file(s). ${usage(records)}`,
+  );
+
+  const packetPath = args.out ?? path.join(linterDir, "proposals", `${packet.stem}.packet.md`);
+  mkdirSync(path.dirname(packetPath), { recursive: true });
+  writeFileSync(packetPath, packet.markdown);
+  console.log(`wrote packet ${path.relative(process.cwd(), packetPath)}`);
+  if (args.dryRun) {
+    console.log(
+      "--dry-run: stopping before the model call. Hand the packet to a model or a person to draft the check.",
+    );
+    return 0;
+  }
+
+  const result = await proposeWithClaude(packet.markdown, {
+    model: args.model,
+    effort: args.effort,
+    onStatus: (l) => console.log(l),
+  });
+  const { proposal } = result;
+  console.log(
+    `${result.model}: drafted check "${proposal.check.id}" with ${proposal.fixtures.length} fixture(s) and ${proposal.answerKey.length} answer-key entries (${result.usage.input.toLocaleString()} in / ${result.usage.output.toLocaleString()} out tokens)`,
+  );
+
+  const applied = applyProposal(linterDir, proposal, packet.markdown, {
+    model: result.model,
+    guidanceFile: packet.guidanceFile,
+  });
+  for (const f of applied.written) console.log(`  wrote ${f}`);
+  if (!applied.registered)
+    console.log(
+      `  could not register the check automatically; add \`${proposal.check.exportName}\` to the checks array in src/linter.ts`,
+    );
+  console.log(
+    `\nReview first: proposals/${proposal.check.id}.md (questions and thresholds), then src/checks/${proposal.check.fileName}.`,
+  );
+  if (proposal.review.factsNeeded.length > 0) {
+    console.log(`The draft says it would be better with facts the engine does not extract:`);
+    for (const f of proposal.review.factsNeeded) console.log(`  - ${f}`);
+  }
+
+  if (!args.runCalibrate) {
+    console.log(
+      `\nNext: (cd ${path.relative(process.cwd(), linterDir) || "."} && pnpm build && jev-lint calibrate --plugin dist/index.js --key answer-key.json fixtures)`,
+    );
+    return 0;
+  }
+  console.log(`\nbuilding ${path.relative(process.cwd(), linterDir) || "."}…`);
+  const build = spawnSync("pnpm", ["build"], { cwd: linterDir, encoding: "utf8" });
+  if (build.status !== 0) {
+    console.error(build.stdout);
+    console.error(build.stderr);
+    return fail("the drafted check did not compile; fix src/checks and rerun calibrate");
+  }
+  const keyPath = path.join(linterDir, "answer-key.json");
+  return calibrateCmd({
+    ...args,
+    key: keyPath,
+    paths: [path.join(linterDir, "fixtures")],
+    out: path.join(linterDir, "proposals", `${proposal.check.id}.calibration.md`),
+  });
 }
 
 function fail(msg: string): number {
@@ -203,12 +302,30 @@ function fail(msg: string): number {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const commands: Record<string, (a: Args) => number> = { survey, calibrate: calibrateCmd, propose };
+const commands: Record<string, (a: Args) => number | Promise<number>> = {
+  survey,
+  calibrate: calibrateCmd,
+  propose,
+};
 const run = commands[args.command];
 if (!run) {
   console.log(
-    "usage: jev-lint <survey|calibrate|propose> --plugin <dist/index.js> [--key answer-key.json] [--guidance <file.md>] [--threshold 0.7] [--out <file>] <paths...>",
+    [
+      "usage:",
+      "  jev-lint survey    --plugin <dist/index.js> [--threshold 0.7] <paths...>",
+      "  jev-lint calibrate --plugin <dist/index.js> --key <answer-key.json> [--out <report.md>] <fixtures...>",
+      "  jev-lint propose   --plugin <dist/index.js> --guidance <skills/<skill>/references/<file>.md>",
+      "                     [--linter <dir>] [--dry-run] [--model claude-opus-5] [--effort high] [--calibrate] <paths...>",
+      "",
+      "Needs TYPESAFE_API_KEY for jev. `propose` (without --dry-run) also needs Anthropic credentials:",
+      "ANTHROPIC_API_KEY, or an `ant auth login` profile.",
+    ].join("\n"),
   );
   process.exit(args.command === "help" ? 0 : 2);
 }
-process.exit(run(args));
+try {
+  process.exit(await run(args));
+} catch (error) {
+  console.error(`jev-lint: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}

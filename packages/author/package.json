@@ -16,10 +16,12 @@
     "build": "tsc -p tsconfig.json && chmod 755 dist/cli.js",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@jev-oxlint/engine": "workspace:*"
+    "@anthropic-ai/sdk": "^0.126.0",
+    "@jev-oxlint/engine": "workspace:*",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

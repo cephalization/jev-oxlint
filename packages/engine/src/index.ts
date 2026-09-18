@@ -46,3 +46,6 @@ export type {
 } from "./jev/types.js";
 export { API_KEY_ENV, DEFAULT_BASE_URL, DEFAULT_MODEL } from "./jev/types.js";
 export type { Plugin, Rule, RuleContext } from "./oxlintTypes.js";
+
+/** Path of the `Check` contract source, shipped with the package for proposers to read. */
+export { checkContractPath } from "./contract.js";
