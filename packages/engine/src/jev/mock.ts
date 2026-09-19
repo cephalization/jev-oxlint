@@ -1,5 +1,5 @@
 /**
- * Offline stand-in for jev used by tests and by `OXLINT_JEV_MODE=mock`.
+ * Offline stand-in for jev used by `OXLINT_JEV_MODE=mock`.
  * Answers come from a JSON file keyed by file basename then question key;
  * anything unlisted gets a neutral answer that never produces a finding.
  */

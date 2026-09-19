@@ -1,148 +1,175 @@
 # jev-oxlint
 
-Build your own [jev](https://docs.typesafe.ai/introduction)-powered [oxlint](https://oxc.rs/docs/guide/usage/linter.html)
-linter from a directory of agent skills.
+Build an [Oxlint JavaScript plugin](https://oxc.rs/docs/guide/usage/linter/js-plugins) from an agent
+skill. Deterministic AST checks handle structural rules, while
+[Jev](https://docs.typesafe.ai/introduction) answers narrow, typed questions that require contextual
+judgment.
 
-A skill (a `SKILL.md` index plus `references/*.md`) is guidance written for people and
-coding agents. This repo turns it into a linter for the class of mistakes a regex or a
-type checker cannot see but a person who read the docs would: flushing spans only on the
-happy path, a `CHAIN` span around what is really a retriever, a patient's diagnosis in a
-span attribute. jev, a calibrated classifier rather than a text generator, answers narrow
-questions about each file against the shipped guidance; code decides everything else.
+The result is a project-specific linter that can:
 
-> Status: experiment. Nothing is published. The Phoenix example is real and validated live.
+- limit analysis to files that import selected packages;
+- route relevant skill guidance to each file;
+- report broad guidance hints before precise checks exist;
+- combine AST prechecks, model answers, and deterministic thresholds; and
+- calibrate model-backed checks against a human answer key.
 
-## What's here
+> **Experimental:** Oxlint JavaScript plugins are alpha. Live cache misses make synchronous network
+> requests, so this project is best suited to evaluation and targeted workflows. The packages are
+> not yet published; use a local clone as described below.
 
-| Package                                                | What it is                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`packages/engine`](packages/engine)                   | `@jev-oxlint/engine` — the runtime. Redaction, the sync bridge (oxlint rules are synchronous; jev is HTTP), the content-hash cache, generic AST fact extraction, guidance routing and the hint tier, and the `Check` contract. Knows nothing about any particular SDK. |
-| [`packages/create`](packages/create)                   | `create-jev-linter` — scaffolds a linter package from a skills directory. It works immediately with zero checks, in hint mode.                                                                                                                                         |
-| [`packages/author`](packages/author)                   | `jev-lint` — `survey` (which guidance applies to a codebase?), `calibrate` (do jev's answers match the human answer key?), `propose` (ask Claude to draft one check, its fixtures and answer key from the survey, then write and register them for review).            |
-| [`examples/phoenix-tracing`](examples/phoenix-tracing) | A complete linter for Phoenix's `phoenix-tracing` skill: five checks, thirteen fixtures, an answer key. This is what `propose` is meant to produce, one check at a time.                                                                                               |
+## Quick start
 
-## How a linter works
+Requirements: Node.js 22 or later, pnpm 12, and a project skill containing `SKILL.md` with optional
+`references/*.md` files.
 
-```
-file ──► ImportDeclaration scan ──► imports none of the target packages? ──► done (free)
-              ▼
-        generic fact extraction (redacted): calls to imported symbols with their
-        object-literal args broken into key/value-expression pairs, tracked member
-        calls, process handlers, exports, flag properties
-              ▼
-        per-check precheck ──► clear-cut? report or skip without jev
-              ▼
-        routing request: one Noul per reference file, "does this apply?", SKILL.md as index
-              ▼
-        ONE detailed request per file
-          state     = { file, code: { redaction, text, calls[] }, facts, guidance: <whole files> }
-          questions = every applicable check's Noul/Choice questions + one coarse hint question
-                      per relevant guidance file no check covers
-              │  sha256(request) → cache; worker thread + Atomics.wait bridge
-              ▼
-        decide() ──► context.report() citing guidance files;  hints name the doc to read
-```
-
-Three rules, all borrowed from TypeSafe's own
-[how-to-build guidance](https://docs.typesafe.ai/concepts/how-to-build-with-system-one):
-
-1. **Code decides everything it can.** Triggers, facts and prechecks are plain AST work.
-2. **The policy goes in `state`.** Guidance files are copied whole into the request and
-   cited by path. Nothing inside the markdown is parsed; the file path is the only coupling,
-   verified at build time.
-3. **Questions are atomic and reviewable.** One check file per check; questions and
-   thresholds are what a reviewer reads first.
-
-### What leaves the machine
-
-Before any request is built, the source is rewritten from the AST: string literal values
-become `"<str:N>"`, template quasis `<str:N>`, long numbers `<num:N>`. Property keys,
-import sources, directives and the `kind`/`name`/`type` option values are kept. Identifiers,
-member expressions and comments are kept. Hardcoded values in span attributes are decided in
-code and never sent. Every request body is recorded under `node_modules/.cache/oxlint-jev`
-as an audit trail. The API key comes only from `TYPESAFE_API_KEY` in the process environment.
-
-## Building a linter
+Build the toolkit, then scaffold a linter next to the project that it will inspect:
 
 ```bash
-pnpm install && pnpm build
+git clone <repository-url> /absolute/path/to/jev-oxlint
+cd /absolute/path/to/jev-oxlint
+pnpm install
+pnpm build
 
-# 1. scaffold: works immediately in hint mode, zero checks
-node packages/create/dist/cli.js my-lint --skills ~/proj/.agents/skills --skill my-skill \
-  --targets '^@my/(sdk|client)(/.*)?$'
+node packages/create/dist/cli.js ../my-linter \
+  --skills /absolute/path/to/project/.agents/skills \
+  --skill my-skill \
+  --targets '^@my/(sdk|client)(/.*)?$' \
+  --local-repo /absolute/path/to/jev-oxlint
 
-# 2. look: which guidance applies to this codebase, and how often?
-TYPESAFE_API_KEY=… jev-lint survey --plugin my-lint/dist/index.js ~/proj/src
-
-# 3. propose: Claude drafts ONE check + fixtures + answer key from the survey and the guidance,
-#    writes them into the linter, registers the check, and (with --calibrate) builds and calibrates
-ANTHROPIC_API_KEY=… jev-lint propose --plugin my-lint/dist/index.js \
-  --guidance my-lint/skills/my-skill/references/x.md --calibrate ~/proj/src
-#    --dry-run writes only the packet (proposals/x.packet.md) for a person or another model
-
-# 4. review proposals/<check>.md first (questions, thresholds), edit src/checks/<check>.ts, then
-jev-lint calibrate --plugin my-lint/dist/index.js --key my-lint/answer-key.json my-lint/fixtures
-
-# 5. ship: add to any .oxlintrc.json
-#   { "jsPlugins": [{ "name": "my", "specifier": "my-lint" }], "rules": { "my/guidance": "warn" } }
+cd ../my-linter
+pnpm install
+pnpm build
 ```
 
-Where a generative model sits: only in step 3, and only when you run it. `propose` sends
-Claude (`claude-opus-5` by default, adaptive thinking, structured output) a packet built from
-the survey: the guidance file, the relevant files exactly as jev saw them (redacted), the
-engine's `Check` contract and a worked example. It returns a typed bundle: one check module,
-fixtures (violation, correct, trap), answer-key entries, and review notes that lead with the
-questions and thresholds. Auth is the SDK default: `ANTHROPIC_API_KEY` or an `ant auth login`
-profile. jev runs on every lint, cached by content; nothing generative is in the lint path,
-and nothing generative sees unredacted code.
-
-## Running the example
+The generated linter initially has no precise checks. It uses the skill as a hint tier, identifying
+which guidance applies to each in-scope file and reporting likely deviations. Survey a codebase to
+find guidance that should become a precise check:
 
 ```bash
-pnpm --filter @jev-oxlint/example-phoenix-tracing build
-TYPESAFE_API_KEY=… OXLINT_JEV_MODE=live pnpm --filter @jev-oxlint/example-phoenix-tracing demo
-pnpm --filter @jev-oxlint/example-phoenix-tracing test    # answer key via OXLINT_JEV_MODE=mock
+TYPESAFE_API_KEY=… pnpm survey /absolute/path/to/project/src
 ```
 
-Modes (`OXLINT_JEV_MODE`): `live`, `record` (write requests, no network), `mock` (answers from
-`OXLINT_JEV_MOCK_FILE`), `off`. Default is live when the key is set, else off with one notice.
+Run the generated Oxlint plugin directly with its configuration:
 
-## What the Phoenix experiment showed
+```bash
+TYPESAFE_API_KEY=… pnpm exec oxlint \
+  -c /absolute/path/to/my-linter/.oxlintrc.json \
+  /absolute/path/to/project/src
+```
 
-Measured against jev-1.13.0 on the fixtures and every app in Phoenix's `js/examples/apps`.
+The scaffold defaults to published `@jev-oxlint/engine` and `@jev-oxlint/author` dependencies. Until
+those packages are available, `--local-repo` links them from a clone. Use `--workspace` when the new
+linter is inside this pnpm workspace.
 
-- **jev agrees with the human answer key on every fixture, with wide margins.** Per-attribute
-  PII: `token_count` 0.04, `patient_dob` 0.98, `chief_complaint` 0.98 in one request, where a
-  keyword denylist is wrong in both directions.
-- **It found a real bug in a shipped example**: the langchain quickstart flushes only on the
-  success path (noul 0.07 for "flushed on every exit path?").
-- **Guidance in `state` steers the model, measurably.** Every misfire during development was
-  fixed by adding a sentence of true guidance or splitting a question, never by moving a
-  threshold. Mentioning a candidate answer in the question text acts as an anchor even when
-  redundant with state.
-- **Routing is sharp; the coarse hint question is not.** Relevance separated 0.80–0.94 from
-  below 0.50 across 41 files. "Does the code follow this whole file?" is diffuse, as TypeSafe
-  predicts for broad questions, so hints gate at 0.80 and are labelled coarse. The precise
-  version of a hint is a check.
-- **A one-sentence docs edit changed what the linter finds.** Adding "span error handling" to
-  one `SKILL.md` blurb moved a reference's relevance from below 0.50 to 0.90 and fired the
-  hint at 1.00, with no plugin change. Hint recall is bounded by the index's blurbs.
-- **Cost.** ~$0.002 for the fixtures; ~$0.015 for 41 files with routing. Second run: zero requests.
+## Author a precise check
 
-### What `propose` drafted, unprompted
+`jev-lint propose` creates a redacted context packet from a guidance file and source samples. A
+proposal provider returns a draft check, realistic fixtures, answer-key entries, and review notes.
 
-Run against Phoenix's example apps for `references/annotations-typescript.md`, a guidance file
-no check covered, `claude-opus-5` drafted
-[`annotation-identifier-collision`](examples/phoenix-tracing/src/checks/annotationIdentifierCollision.ts)
-in 253 s (23k in / 22.5k out tokens): structured annotations are keyed by (name, target id,
-identifier) and silently overwrite, while notes are append-only, so a loop writing one
-annotation per reviewer without a distinct `identifier` loses all but the last verdict. It
-compiled on the first try, registered itself, and shipped four fixtures including two traps
-(an idempotent evaluator re-run, and free-form notes, which are supposed to look similar but
-are fine). Its answer key agreed with jev on all four on the first calibration (violation
-0.08, correct 0.92, traps 0.50 and 0.66 for "uniquely keyed?"). The review note it wrote
-leads with the one question and the threshold band, and lists four facts the engine does not
-extract that would let the precheck decide more cases in code. One redundant type cast was
-removed by hand; nothing else was changed. The first attempt failed on a truncated structured
-output: adaptive thinking shares `max_tokens` with the answer, so `propose` streams with a
-64k budget.
+Anthropic is the default proposal provider:
+
+```bash
+TYPESAFE_API_KEY=… ANTHROPIC_API_KEY=… pnpm exec jev-lint propose \
+  --plugin dist/index.js \
+  --guidance skills/my-skill/references/topic.md \
+  --calibrate /absolute/path/to/project/src
+```
+
+The [Codex SDK](https://developers.openai.com/codex/sdk) is also supported:
+
+```bash
+pnpm add -D @openai/codex-sdk
+
+TYPESAFE_API_KEY=… pnpm exec jev-lint propose \
+  --provider codex \
+  --plugin dist/index.js \
+  --guidance skills/my-skill/references/topic.md \
+  --calibrate /absolute/path/to/project/src
+```
+
+The Codex provider uses an existing Codex login or `CODEX_API_KEY`.
+
+Use `--model <id>` to select a model or `--dry-run` to write only the context packet. Treat all
+generated code as a draft. Review `proposals/<check>.md`, the questions and thresholds, the check
+source, and its fixtures before use.
+
+## How linting works
+
+```text
+target import gate
+  -> deterministic AST facts and prechecks
+  -> guidance-routing request
+  -> one detailed request containing applicable checks and hints
+  -> deterministic probability thresholds and Oxlint diagnostics
+```
+
+The design follows three rules:
+
+1. Code decides everything it can: import gates, facts, triggers, prechecks, and thresholds.
+2. Policy stays in the request state: checks cite complete guidance files instead of parsing
+   Markdown sections.
+3. Questions remain atomic: each check owns reviewable questions and deterministic decisions.
+
+Each stage sends all of its questions in one request. The cache key covers the model, redacted code,
+extracted facts, guidance, and questions. An unchanged request reuses its stored response.
+
+## Data handling
+
+Live mode sends the following data to TypeSafe:
+
+- the relative file path;
+- source with ordinary string literals, template text, and long numbers replaced by length
+  placeholders;
+- extracted imports, calls, object keys, member calls, handlers, exports, and flags; and
+- applicable guidance files and questions.
+
+Identifiers, comments, property keys, import sources, directives, type-level literals, and selected
+structural option values remain visible. Redaction reduces accidental disclosure of literal data;
+it is not a secrecy boundary. Inspect a request in `record` mode before using live mode with a
+sensitive repository.
+
+Request records default to `node_modules/.cache/oxlint-jev`. Set `OXLINT_JEV_CACHE_DIR` to use
+another location. If no `node_modules` directory is available, the engine uses the system temporary
+directory. Records contain redacted source and complete guidance text and should receive the same
+access controls as the repository.
+
+Jev reads `TYPESAFE_API_KEY`. Anthropic and Codex credentials are only used by `jev-lint propose`;
+proposal providers are not part of the lint path.
+
+## Runtime modes
+
+Set `OXLINT_JEV_MODE` to one of the following values:
+
+- `live` calls Jev and caches the response.
+- `record` writes request bodies without calling Jev.
+- `mock` reads answers from `OXLINT_JEV_MOCK_FILE`.
+- `off` skips Jev-backed checks.
+
+The default is `live` when `TYPESAFE_API_KEY` is set and `off` otherwise. On a cache miss, an
+in-scope file can make one routing request and one detailed request. Because Oxlint rule visitors
+are synchronous, network latency affects uncached live runs.
+
+## Example
+
+[`examples/phoenix-tracing`](examples/phoenix-tracing) is a worked linter with six checks, seventeen
+fixtures, and a human answer key. Its [experiment notes](docs/phoenix-experiment.md) document the
+live calibration result and reproduction commands. The [`propose` case study](docs/propose-case-study.md)
+shows the output of the check-authoring workflow.
+
+## Repository layout
+
+| Path                                                   | Purpose                                                                                                          |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| [`packages/engine`](packages/engine)                   | Oxlint runtime, fact extraction, redaction, guidance routing, cache, synchronous Jev bridge, and check contract. |
+| [`packages/create`](packages/create)                   | `create-jev-linter` scaffolding for registry, workspace, and local-clone dependency modes.                       |
+| [`packages/author`](packages/author)                   | `jev-lint survey`, `calibrate`, and `propose`, with Anthropic and Codex proposal providers.                      |
+| [`examples/phoenix-tracing`](examples/phoenix-tracing) | Worked example and calibration material.                                                                         |
+
+## Development
+
+```bash
+pnpm typecheck
+pnpm build
+pnpm lint
+pnpm fmt:check
+```

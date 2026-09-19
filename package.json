@@ -7,7 +7,6 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r --workspace-concurrency=1 run build",
-    "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
     "lint": "oxlint packages examples",
     "fmt": "oxfmt",
@@ -18,8 +17,7 @@
     "@types/node": "^26.5.1",
     "oxfmt": "^0.58.0",
     "oxlint": "~1.79.0",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.0"
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=22"

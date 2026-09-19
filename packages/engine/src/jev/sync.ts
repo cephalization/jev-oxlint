@@ -14,7 +14,7 @@ import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_thread
 import type { MessagePort } from "node:worker_threads";
 
 import type { SystemOneRequest } from "./types.js";
-import type { WorkerCall, WorkerResult } from "./worker.js";
+import type { WorkerCall, WorkerReply, WorkerResult } from "./worker.js";
 
 interface Bridge {
   signal: Int32Array;
@@ -23,6 +23,13 @@ interface Bridge {
 }
 
 let bridge: Bridge | undefined;
+let nextCallId = 1;
+
+export function workerResultForCall(reply: WorkerReply, id: number): WorkerResult | undefined {
+  if (reply.id !== id) return undefined;
+  const { id: _id, ...result } = reply;
+  return result;
+}
 
 function getBridge(): Bridge {
   if (bridge) return bridge;
@@ -48,29 +55,48 @@ export interface CallOptions {
 export function callJevSync(body: SystemOneRequest, options: CallOptions): WorkerResult {
   const { signal, port } = getBridge();
   const timeoutMs = options.timeoutMs ?? 30_000;
-  Atomics.store(signal, 0, 0);
+  const id = nextCallId++;
   const call: WorkerCall = {
+    id,
     url: options.url,
     apiKey: options.apiKey,
     body,
     timeoutMs,
   };
   port.postMessage(call);
-  const waited = Atomics.wait(signal, 0, 0, timeoutMs + 1_000);
-  if (waited === "timed-out") {
-    return {
-      ok: false,
-      error: `jev call timed out after ${timeoutMs}ms`,
-      ms: timeoutMs,
-    };
+  const deadline = Date.now() + timeoutMs + 1_000;
+
+  for (;;) {
+    // A timed-out request may complete after the next request starts. Drain and
+    // discard replies by id so a late answer can never be attributed to the
+    // current request and cached under the wrong content hash.
+    let message = receiveMessageOnPort(port);
+    while (message) {
+      const reply = message.message as WorkerReply;
+      const result = workerResultForCall(reply, id);
+      if (result) return result;
+      message = receiveMessageOnPort(port);
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0)
+      return {
+        ok: false,
+        error: `jev call timed out after ${timeoutMs}ms`,
+        ms: timeoutMs,
+      };
+
+    Atomics.store(signal, 0, 0);
+    // Check again after resetting the signal. If a reply raced with the reset,
+    // it is already queued; if it arrives after this check, Atomics.wait sees
+    // the changed signal value or receives the notification.
+    message = receiveMessageOnPort(port);
+    if (message) {
+      const reply = message.message as WorkerReply;
+      const result = workerResultForCall(reply, id);
+      if (result) return result;
+      continue;
+    }
+    Atomics.wait(signal, 0, 0, remaining);
   }
-  const message = receiveMessageOnPort(port);
-  if (!message) {
-    return {
-      ok: false,
-      error: "worker signalled completion without a result",
-      ms: 0,
-    };
-  }
-  return message.message as WorkerResult;
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * create-jev-linter <dir> --skills <path-to-skills-dir> --skill <name> --targets <regex> [--name <plugin-name>] [--workspace]
+ * create-jev-linter <dir> --skills <path-to-skills-dir> --skill <name> --targets <regex>
+ *   [--name <plugin-name>] [--workspace | --local-repo <jev-oxlint checkout>]
  *
  * Scaffolds a linter package that depends on @jev-oxlint/engine. It ships
  * with zero checks and works immediately in hint mode: routing over the
@@ -8,6 +9,8 @@
  */
 import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+
+import { dependencySpecs } from "./dependencies.js";
 
 const argv = process.argv.slice(2);
 const dir = argv.find((a) => !a.startsWith("--"));
@@ -19,12 +22,21 @@ const skillsDir = opt("--skills");
 const skill = opt("--skill");
 const targets = opt("--targets");
 const name = opt("--name") ?? skill ?? "jev";
-// --workspace: emit workspace:* deps (for scaffolding inside the jev-oxlint monorepo itself).
-const dep = argv.includes("--workspace") ? "workspace:*" : "^0.1.0";
+const localRepo = opt("--local-repo");
+const dependencies = dependencySpecs({ workspace: argv.includes("--workspace"), localRepo });
+
+if (
+  localRepo &&
+  (!existsSync(path.join(localRepo, "packages", "engine", "package.json")) ||
+    !existsSync(path.join(localRepo, "packages", "author", "package.json")))
+) {
+  console.error(`create-jev-linter: ${localRepo} is not a jev-oxlint checkout`);
+  process.exit(1);
+}
 
 if (!dir || !skillsDir || !skill || !targets) {
   console.log(
-    "usage: create-jev-linter <dir> --skills <skills-dir> --skill <skill-folder> --targets <import-regex> [--name <plugin-name>]",
+    "usage: create-jev-linter <dir> --skills <skills-dir> --skill <skill-folder> --targets <import-regex> [--name <plugin-name>] [--workspace | --local-repo <jev-oxlint checkout>]",
   );
   process.exit(2);
 }
@@ -59,16 +71,14 @@ write(
         "sync-skills": "node dist/sync.js",
         survey: "jev-lint survey --plugin dist/index.js",
         calibrate: "jev-lint calibrate --plugin dist/index.js --key answer-key.json fixtures",
-        test: "vitest run --passWithNoTests",
       },
-      dependencies: { "@jev-oxlint/engine": dep },
+      dependencies: { "@jev-oxlint/engine": dependencies.engine },
       devDependencies: {
-        "@jev-oxlint/author": dep,
+        "@jev-oxlint/author": dependencies.author,
         "@types/estree": "^1.0.9",
         "@types/node": "^26.5.1",
         oxlint: "~1.79.0",
         typescript: "^7.0.2",
-        vitest: "^5.0.0",
       },
     },
     null,
@@ -181,8 +191,8 @@ write(
 A jev-powered oxlint linter built from the \`${skill}\` skill.
 
 \`\`\`bash
-pnpm install && pnpm build          # copies nothing yet; run sync-skills first
-pnpm sync-skills && pnpm build      # copy skill files in, verify citations
+pnpm install && pnpm build          # build with the skill copied by the scaffold
+pnpm sync-skills && pnpm build      # refresh the skill from its source later
 TYPESAFE_API_KEY=… pnpm survey ./src   # which guidance applies to your code?
 \`\`\`
 

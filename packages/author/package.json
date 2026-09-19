@@ -15,8 +15,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod 755 dist/cli.js",
     "clean": "rm -rf dist",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.126.0",
@@ -24,11 +23,17 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^26.5.1",
-    "vitest": "^5.0.0"
+    "@openai/codex-sdk": "^0.155.0",
+    "@types/node": "^26.5.1"
   },
   "peerDependencies": {
+    "@openai/codex-sdk": "^0.155.0",
     "oxlint": ">=1.79.0"
+  },
+  "peerDependenciesMeta": {
+    "@openai/codex-sdk": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=22"

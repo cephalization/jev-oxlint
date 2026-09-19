@@ -20,13 +20,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/check.ts dist/check.contract.ts.txt",
     "clean": "rm -rf dist",
-    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
     "@types/estree": "^1.0.9",
-    "@types/node": "^26.5.1",
-    "vitest": "^5.0.0"
+    "@types/node": "^26.5.1"
   },
   "peerDependencies": {
     "oxlint": ">=1.79.0"

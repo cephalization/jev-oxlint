@@ -13,6 +13,7 @@ interface WorkerInit {
 }
 
 export interface WorkerCall {
+  id: number;
   url: string;
   apiKey: string;
   body: SystemOneRequest;
@@ -22,6 +23,8 @@ export interface WorkerCall {
 export type WorkerResult =
   | { ok: true; response: SystemOneResponse; ms: number }
   | { ok: false; error: string; status?: number; ms: number };
+
+export type WorkerReply = WorkerResult & { id: number };
 
 const { sab, port } = workerData as WorkerInit;
 const signal = new Int32Array(sab);
@@ -58,7 +61,8 @@ port.on("message", async (call: WorkerCall) => {
   } catch (error) {
     result = { ok: false, error: String(error), ms: Date.now() - started };
   }
-  port.postMessage(result);
+  const reply: WorkerReply = { ...result, id: call.id };
+  port.postMessage(reply);
   Atomics.store(signal, 0, 1);
   Atomics.notify(signal, 0);
 });

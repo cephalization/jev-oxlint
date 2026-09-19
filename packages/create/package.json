@@ -14,12 +14,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod 755 dist/cli.js",
     "clean": "rm -rf dist",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "@types/node": "^26.5.1",
-    "vitest": "^5.0.0"
+    "@types/node": "^26.5.1"
   },
   "engines": {
     "node": ">=22"

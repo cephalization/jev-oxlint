@@ -5,7 +5,8 @@
  *   jev-lint survey    --plugin <dist/index.js> [--threshold 0.7] <paths...>
  *   jev-lint calibrate --plugin <dist/index.js> --key <answer-key.json> <fixtures...>
  *   jev-lint propose   --plugin <dist/index.js> --guidance <references/x.md> [--linter <dir>]
- *                      [--dry-run] [--model claude-opus-5] [--effort high] [--calibrate] <paths...>
+ *                      [--provider anthropic|codex] [--dry-run] [--model <id>]
+ *                      [--effort high] [--calibrate] <paths...>
  *
  * All three run oxlint with the given plugin in live mode against a private
  * cache directory, then read the recorded requests/responses. `propose`
@@ -34,6 +35,8 @@ import type { LinterInfo } from "./packet.js";
 import { buildPacket } from "./packet.js";
 import type { ProposeOptions } from "./propose.js";
 import { DEFAULT_MODEL, proposeWithClaude } from "./propose.js";
+import { proposeWithCodex } from "./proposeCodex.js";
+import { assertCommandSucceeded, assertComparedAnswers } from "./validation.js";
 
 interface Args {
   command: string;
@@ -44,7 +47,8 @@ interface Args {
   threshold: number;
   out?: string;
   dryRun: boolean;
-  model: string;
+  provider: "anthropic" | "codex";
+  model?: string;
   effort?: ProposeOptions["effort"];
   runCalibrate: boolean;
   paths: string[];
@@ -56,7 +60,7 @@ function parseArgs(argv: string[]): Args {
     threshold: 0.7,
     paths: [],
     dryRun: false,
-    model: DEFAULT_MODEL,
+    provider: "anthropic",
     runCalibrate: false,
   };
   for (let i = 1; i < argv.length; i++) {
@@ -68,7 +72,12 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--threshold") args.threshold = Number(next());
     else if (a === "--out") args.out = next();
     else if (a === "--linter") args.linter = next();
-    else if (a === "--model") args.model = next() ?? DEFAULT_MODEL;
+    else if (a === "--provider") {
+      const provider = next();
+      if (provider !== "anthropic" && provider !== "codex")
+        throw new Error("--provider must be anthropic or codex");
+      args.provider = provider;
+    } else if (a === "--model") args.model = next();
     else if (a === "--effort") args.effort = next() as ProposeOptions["effort"];
     else if (a === "--dry-run") args.dryRun = true;
     else if (a === "--calibrate") args.runCalibrate = true;
@@ -105,7 +114,7 @@ function runPlugin(plugin: string, paths: string[], mode: "live" | "mock"): Anal
       OXLINT_JEV_QUIET: "1",
     },
   });
-  if (result.error) throw result.error;
+  assertCommandSucceeded("oxlint", result);
   process.stderr.write(result.stderr);
   return readRecords(cacheDir);
 }
@@ -118,6 +127,8 @@ function usage(records: AnalysisRecord[]): string {
 function survey(args: Args): number {
   if (!args.plugin) return fail("survey needs --plugin <path to built plugin>");
   const records = runPlugin(args.plugin, args.paths, "live");
+  if (records.length === 0)
+    return fail("survey recorded no requests; check the input paths and target import pattern");
   const files = new Set(records.map((r) => r.filename)).size;
   const rows = summarizeRouting(records, args.threshold);
   console.log(`\nSurveyed ${files} in-scope file(s). Guidance relevance (≥ ${args.threshold}):\n`);
@@ -138,6 +149,7 @@ function calibrateCmd(args: Args): number {
   const key = JSON.parse(readFileSync(args.key, "utf8")) as AnswerKey;
   const records = runPlugin(args.plugin, args.paths, "live");
   const rows = calibrate(records, key);
+  assertComparedAnswers(rows.length);
   const failed = rows.filter((r) => !r.ok);
   console.log(
     `\n${rows.length} answers compared against ${path.basename(args.key)}; ${failed.length} outside tolerance.\n`,
@@ -231,6 +243,8 @@ async function propose(args: Args): Promise<number> {
     `surveying ${args.paths.length} path(s) with ${path.relative(process.cwd(), args.plugin)}…`,
   );
   const records = runPlugin(args.plugin, args.paths, "live");
+  if (records.length === 0)
+    return fail("propose recorded no requests; check the input paths and target import pattern");
   const packet = buildPacket(records, args.guidance, args.threshold, info);
   console.log(
     `${packet.guidanceFile}: relevant to ${packet.relevantCount} of ${packet.surveyedCount} in-scope file(s). ${usage(records)}`,
@@ -247,8 +261,9 @@ async function propose(args: Args): Promise<number> {
     return 0;
   }
 
-  const result = await proposeWithClaude(packet.markdown, {
-    model: args.model,
+  const proposeWithModel = args.provider === "codex" ? proposeWithCodex : proposeWithClaude;
+  const result = await proposeWithModel(packet.markdown, {
+    model: args.model ?? (args.provider === "anthropic" ? DEFAULT_MODEL : undefined),
     effort: args.effort,
     onStatus: (l) => console.log(l),
   });
@@ -282,7 +297,9 @@ async function propose(args: Args): Promise<number> {
   }
   console.log(`\nbuilding ${path.relative(process.cwd(), linterDir) || "."}…`);
   const build = spawnSync("pnpm", ["build"], { cwd: linterDir, encoding: "utf8" });
-  if (build.status !== 0) {
+  try {
+    assertCommandSucceeded("pnpm build", build);
+  } catch {
     console.error(build.stdout);
     console.error(build.stderr);
     return fail("the drafted check did not compile; fix src/checks and rerun calibrate");
@@ -315,10 +332,12 @@ if (!run) {
       "  jev-lint survey    --plugin <dist/index.js> [--threshold 0.7] <paths...>",
       "  jev-lint calibrate --plugin <dist/index.js> --key <answer-key.json> [--out <report.md>] <fixtures...>",
       "  jev-lint propose   --plugin <dist/index.js> --guidance <skills/<skill>/references/<file>.md>",
-      "                     [--linter <dir>] [--dry-run] [--model claude-opus-5] [--effort high] [--calibrate] <paths...>",
+      "                     [--linter <dir>] [--provider anthropic|codex] [--dry-run]",
+      "                     [--model <id>] [--effort high] [--calibrate] <paths...>",
       "",
-      "Needs TYPESAFE_API_KEY for jev. `propose` (without --dry-run) also needs Anthropic credentials:",
-      "ANTHROPIC_API_KEY, or an `ant auth login` profile.",
+      "Needs TYPESAFE_API_KEY for jev. `propose` (without --dry-run) also needs provider credentials:",
+      "Anthropic: ANTHROPIC_API_KEY or an `ant auth login` profile.",
+      "Codex: @openai/codex-sdk plus an existing Codex login or CODEX_API_KEY.",
     ].join("\n"),
   );
   process.exit(args.command === "help" ? 0 : 2);

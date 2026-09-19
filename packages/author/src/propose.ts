@@ -58,7 +58,7 @@ export const ProposalSchema = z.object({
 
 export type Proposal = z.infer<typeof ProposalSchema>;
 
-const SYSTEM = `You draft checks for jev-oxlint linters. A check is a TypeScript module in the \`@jev-oxlint/engine\` Check shape that a person will review and calibrate. You will receive a packet containing the guidance to enforce, sample in-scope files (with string literals redacted), the check contract, and a worked example. Produce one check, realistic fixtures, and the answer key a careful reviewer would expect, exactly in the requested structure.
+export const PROPOSAL_SYSTEM = `You draft checks for jev-oxlint linters. A check is a TypeScript module in the \`@jev-oxlint/engine\` Check shape that a person will review and calibrate. You will receive a packet containing the guidance to enforce, sample in-scope files (with string literals redacted), the check contract, and a worked example. Produce one check, realistic fixtures, and the answer key a careful reviewer would expect, exactly in the requested structure.
 
 Priorities, in order: the questions are atomic and precise and point into state by path; the deterministic parts (appliesTo, precheck, decide) are correct TypeScript against the contract; fixtures are realistic and include a trap for naive keyword rules; the answer key uses the exact question keys the check generates. Do not invent engine APIs: use only what the contract and the example show.`;
 
@@ -91,7 +91,7 @@ export async function proposeWithClaude(
       max_tokens: 64000,
       thinking: { type: "adaptive" },
       output_config: { effort: options.effort ?? "high", format: zodOutputFormat(ProposalSchema) },
-      system: SYSTEM,
+      system: PROPOSAL_SYSTEM,
       messages: [{ role: "user", content: packet }],
     });
     let phase = "";
